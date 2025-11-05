@@ -3,13 +3,9 @@ import json
 from typing import List
 
 def _openalex_get(url: str, params=None):
-    cfg = json.load(open("config.json"))
-    base = cfg.get("openalex", {}).get("base_url", "https://api.openalex.org")
-    key = cfg.get("openalex", {}).get("api_key")
     headers = {}
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
     resp = requests.get(url, params=params, headers=headers, timeout=30)
+    print("Returned", url, resp.json())
     resp.raise_for_status()
     return resp.json()
 
@@ -37,8 +33,9 @@ def main(params: dict) -> List[str]:
     # For references: the work contains 'referenced_works' (OpenAlex IDs)
     if request_for == "references":
         refs = w.get("referenced_works", []) or []
+        print("Found referenced works:", refs)
         # resolve a handful of referenced works to DOIs
-        for rid in refs[:50]:
+        for rid in refs[:10]:
             try:
                 r = _openalex_get(rid)
                 doi_r = r.get("doi")

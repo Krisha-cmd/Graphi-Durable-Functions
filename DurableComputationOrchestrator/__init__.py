@@ -36,6 +36,8 @@ def orchestrator_function(context: df.DurableOrchestrationContext):
         gen2.extend(related or [])
     gen2 = [x for x in dict.fromkeys(gen2) if x not in gen1 and x not in level0]
 
+    print("Gen2 DOIs:", gen2)
+
     # Combine all DOIs to process embeddings and metadata
     all_dois = list(dict.fromkeys(level0 + gen1 + gen2))
     print(all_dois)

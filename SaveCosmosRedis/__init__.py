@@ -132,18 +132,42 @@ def main(params: dict):
     normalized_ids = [normalize_doi(d) for d in all_dois]
     vec_map = _fetch_vectors(idx, normalized_ids) if idx is not None else {}
 
+    # Compress function: reduce vector dimensionality for stored JSON only
+    def _compress_vector(vec, target=16):
+        if not vec:
+            return []
+        try:
+            vals = [float(x) for x in vec]
+        except Exception:
+            return []
+        L = len(vals)
+        if L <= target:
+            return vals[:target] + [0.0] * max(0, target - L)
+        import math
+
+        out = []
+        for i in range(target):
+            start = int(math.floor(i * L / target))
+            end = int(math.floor((i + 1) * L / target))
+            if end <= start:
+                end = min(start + 1, L)
+            seg = vals[start:end]
+            out.append(sum(seg) / len(seg) if seg else 0.0)
+        return out
+
     # Helper to build paper object
     def build_paper(d, include_score=False):
         m = meta_map.get(d) or {}
         nid = normalize_doi(d)
         v = vec_map.get(nid) or []
+        cv = _compress_vector(v)
         paper = {
             "doi": d,
             "authors": m.get("authors") or [],
             "venue": m.get("venue") or "",
             "keywords": m.get("keywords") or [],
             "abstract": m.get("abstract") or "",
-            "vector": v,
+            "vector": cv,
             "score": float(scores.get(d, 0.0)) if include_score else None,
             "references": m.get("references") or 0,
             "citating": m.get("citating") or 0,
@@ -158,6 +182,7 @@ def main(params: dict):
     # Build root object
     root_meta = meta_map.get(doi) or {}
     root_vector = vec_map.get(normalize_doi(doi)) or []
+    root_vector = _compress_vector(root_vector)
 
     result = {
         "id": normalize_doi(doi),
@@ -183,14 +208,34 @@ def main(params: dict):
         result["citatingPapers"] = children_objs
         result["referredPapers"] = []
 
-    # Save to Cosmos DB (best-effort)
+    # Save to Cosmos DB (best-effort) and merge when object partially exists
     cosmos_cfg = cfg.get("cosmos", {})
     if CosmosClient and cosmos_cfg.get("connection_string"):
         try:
             client = CosmosClient.from_connection_string(cosmos_cfg.get("connection_string"))
             db = client.get_database_client(cosmos_cfg.get("database"))
             container = db.get_container_client(cosmos_cfg.get("container"))
-            container.upsert_item(result)
+
+            # Attempt to find existing object by doi
+            existing = None
+            try:
+                query = "SELECT * FROM c WHERE c.doi = @doi"
+                items = list(container.query_items(query=query, parameters=[{"name":"@doi","value":doi}], enable_cross_partition_query=True))
+                if items:
+                    existing = items[0]
+            except Exception:
+                logging.exception("Cosmos query failed")
+
+            if existing:
+                    existing["computedCitating"] = "Y"
+                    existing["computedReferences"] = "Y"
+
+                    container.upsert_item(existing)
+                    result = existing
+                
+            else:
+                container.upsert_item(result)
+
         except Exception:
             logging.exception("Failed to upsert item to CosmosDB")
     else:
