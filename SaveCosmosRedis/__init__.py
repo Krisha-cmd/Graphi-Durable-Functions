@@ -227,11 +227,47 @@ def main(params: dict):
                 logging.exception("Cosmos query failed")
 
             if existing:
-                    existing["computedCitating"] = "Y"
-                    existing["computedReferences"] = "Y"
+                # If object exists, prefer any existing child lists; if a list
+                # is missing, use the newly computed list. After merging we
+                # mark both computed flags as 'Y' (the existing object implies
+                # the alternate request was already computed).
 
-                    container.upsert_item(existing)
-                    result = existing
+                existing_cit = existing.get("citatingPapers")
+                existing_ref = existing.get("referredPapers")
+
+                # Choose lists: keep existing if present and non-empty, else use result's
+                chosen_cit = existing_cit if existing_cit else result.get("citatingPapers", [])
+                chosen_ref = existing_ref if existing_ref else result.get("referredPapers", [])
+
+                # Ensure vectors in child items are compressed for storage
+                def _ensure_compressed_list(lst):
+                    out_list = []
+                    for it in lst or []:
+                        if isinstance(it, dict):
+                            it_vec = it.get("vector") or []
+                            it["vector"] = _compress_vector(it_vec)
+                            out_list.append(it)
+                        else:
+                            out_list.append(it)
+                    return out_list
+
+                merged_cit = _ensure_compressed_list(chosen_cit)
+                merged_ref = _ensure_compressed_list(chosen_ref)
+
+                existing["citatingPapers"] = merged_cit
+                existing["referredPapers"] = merged_ref
+
+                # mark both computed flags as Y since we now have both lists
+                existing["computedCitating"] = "Y"
+                existing["computedReferences"] = "Y"
+
+                # ensure root-level metadata present (prefer existing values)
+                for k in ("authors", "venue", "keywords", "abstract", "vector"):
+                    if not existing.get(k) and result.get(k) is not None:
+                        existing[k] = result.get(k)
+
+                container.upsert_item(existing)
+                result = existing
                 
             else:
                 container.upsert_item(result)

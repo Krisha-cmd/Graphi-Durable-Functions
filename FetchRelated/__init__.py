@@ -5,7 +5,7 @@ from typing import List
 def _openalex_get(url: str, params=None):
     headers = {}
     resp = requests.get(url, params=params, headers=headers, timeout=30)
-    print("Returned", url, resp.json())
+    # print("Returned", url, resp.json())
     resp.raise_for_status()
     return resp.json()
 
@@ -35,14 +35,55 @@ def main(params: dict) -> List[str]:
         refs = w.get("referenced_works", []) or []
         print("Found referenced works:", refs)
         # resolve a handful of referenced works to DOIs
-        for rid in refs[:10]:
+        # OpenAlex returns referenced_works as OpenAlex work URLs/IDs. We need
+        # to fetch each work and extract its 'doi' field. To speed this up we
+        # resolve them concurrently with a small pool.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _resolve_openalex_to_doi(rid: str):
+            # Convert an OpenAlex work reference (could be a webpage URL or ID)
+            # into an API call to fetch the work JSON and extract its DOI.
             try:
-                r = _openalex_get(rid)
-                doi_r = r.get("doi")
-                if doi_r:
-                    results.append(doi_r)
+                # normalize id: accept forms like 'https://openalex.org/W123' or 'W123'
+                oid = rid
+                if isinstance(rid, str) and "openalex.org" in rid:
+                    oid = rid.rstrip("/\n \t").split("/")[-1]
+
+                api_url = f"https://api.openalex.org/works/{oid}"
+
+                # small retry (2 attempts)
+                for attempt in range(2):
+                    try:
+                        resp = _openalex_get(api_url)
+                        # DOI may be available in resp['ids']['doi'] or top-level 'doi'
+                        doi_val = None
+                        ids = resp.get("ids") or {}
+                        doi_val = ids.get("doi") or resp.get("doi")
+                        if doi_val:
+                            return doi_val
+                        # no DOI present for this work
+                        return None
+                    except Exception:
+                        # small backoff
+                        import time
+
+                        time.sleep(0.2 + 0.2 * attempt)
+                        continue
             except Exception:
-                continue
+                return None
+
+        # limit how many references we resolve to a reasonable count
+        to_resolve = refs[:10]
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futures = {ex.submit(_resolve_openalex_to_doi, rid): rid for rid in to_resolve}
+            for fut in as_completed(futures):
+                try:
+                    doi_r = fut.result()
+                    if doi_r:
+                        results.append(doi_r)
+                except Exception:
+                    # individual failures are expected; continue
+                    continue
 
     else:
         # For citating: query works that cite this work using OpenAlex filter

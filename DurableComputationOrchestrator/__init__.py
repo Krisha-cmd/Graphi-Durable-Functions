@@ -1,4 +1,27 @@
 import azure.durable_functions as df
+import sys
+import io
+import logging
+
+# Ensure stdout/stderr use UTF-8 so logging and prints don't fail on
+# characters outside the default Windows codepage when running locally
+try:
+    # Replace stdout/stderr with wrappers that encode to utf-8
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+except Exception:
+    # best-effort: if we can't wrap, continue without raising
+    pass
+
+# Also configure root logger to use UTF-8 StreamHandler if necessary
+root_logger = logging.getLogger()
+if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
+    handler = logging.StreamHandler(stream=sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    root_logger.addHandler(handler)
+root_logger.setLevel(logging.INFO)
 
 
 def _normalize_doi(doi: str) -> str:
