@@ -4,3 +4,8 @@
 
 azure-functions
 azure-functions-durable
+requests
+pinecone
+redis
+azure-cosmos
+upstash_redis
