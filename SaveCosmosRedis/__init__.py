@@ -163,6 +163,7 @@ def main(params: dict):
         cv = _compress_vector(v)
         paper = {
             "doi": d,
+            "title": m.get("title") or "",
             "authors": m.get("authors") or [],
             "venue": m.get("venue") or "",
             "keywords": m.get("keywords") or [],
@@ -187,6 +188,7 @@ def main(params: dict):
     result = {
         "id": normalize_doi(doi),
         "doi": doi,
+        "title": root_meta.get("title") or "",
         "authors": root_meta.get("authors") or [],
         "venue": root_meta.get("venue") or "",
         "keywords": root_meta.get("keywords") or [],
